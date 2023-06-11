@@ -25,8 +25,8 @@ def img_max_emotion(g):
 
 
 class WikiArt(Dataset):
-    def __init__(self,args,img_dir,transform=None, target_transform=None,split='train'):
-        self.df = pd.read_csv("../artemis_official/"+args.version+"/artemis_preprocessed.csv",header=0)
+    def __init__(self,args,img_dir,transform_color=None, transform_gray=None,split='train'):
+        self.df = pd.read_csv("../../artemis_official/"+args.version+"/artemis_preprocessed.csv",header=0)
         #self.df=self.df[df.art_style.isin(args.emotions)]
         self.df=self.df[self.df.emotion.isin(emotions.ARTEMIS_EMOTIONS_9)]
         self.df=self.df[self.df.art_style.isin(styles.ABSTRACT_STYLES)]
@@ -49,9 +49,8 @@ class WikiArt(Dataset):
         #reset index
         self.df.reset_index(inplace=True, drop=True)
         self.img_dir = img_dir
-        self.transform = transform
-        self.target_transform = target_transform        
-#        print(self.df)
+        self.transform_color = transform_color
+        self.transform_gray = transform_gray
 
     def __len__(self):
         return len(self.df)
@@ -59,15 +58,11 @@ class WikiArt(Dataset):
     def __getitem__(self, idx):
         img_path = os.path.join(self.img_dir, self.df.iloc[idx,0],self.df.iloc[idx,1]+".jpg")
         img_path = unicodedata.normalize('NFD', img_path)
- #       print(img_path)
         image = Image.open(img_path)
         label = self.df.iloc[idx,3]
-#        print(label)
-        if self.transform:
-            try:
-                image = self.transform(image)
-            except:
-                print(img_path)
-        if self.target_transform:
-            label = self.target_transform(label)
-        return image, label, img_path
+        try:
+            image_color = self.transform_color(image)
+            image_gray = self.transform_gray(image)
+        except:
+            print(img_path)
+        return image_color, image_gray, label, img_path

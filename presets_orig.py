@@ -2,7 +2,7 @@ import torch
 from torchvision.transforms import autoaugment, transforms
 from torchvision.transforms.functional import InterpolationMode
 
-
+'''
 class ClassificationPresetTrain:
     def __init__(
         self,
@@ -45,7 +45,7 @@ class ClassificationPresetTrain:
 
     def __call__(self, img):
         return self.transforms(img)
-
+'''
 
 class ClassificationPresetEval:
     def __init__(
@@ -64,7 +64,31 @@ class ClassificationPresetEval:
                 transforms.CenterCrop(crop_size),
                 transforms.PILToTensor(),
                 transforms.ConvertImageDtype(torch.float),
-                transforms.Normalize(mean=mean, std=std),
+#                transforms.Normalize(mean=mean, std=std),
+            ]
+        )
+
+    def __call__(self, img):
+        return self.transforms(img)
+
+class ClassificationPresetTrain:
+    def __init__(
+        self,
+        *,
+        crop_size,
+        resize_size=256,
+        mean=(0.485, 0.456, 0.406),
+        std=(0.229, 0.224, 0.225),
+        interpolation=InterpolationMode.BILINEAR,
+    ):
+
+        self.transforms = transforms.Compose(
+            [
+                transforms.Resize(resize_size, interpolation=interpolation),
+                transforms.CenterCrop(crop_size),
+                transforms.PILToTensor(),
+                transforms.ConvertImageDtype(torch.float),
+                #transforms.Normalize(mean=mean, std=std), #this makes color meanig (only 0 to 1)
             ]
         )
 

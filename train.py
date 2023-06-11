@@ -21,22 +21,39 @@ from gram_classifier import EmotionGramClassifier
 from color_gram_classifier import EmotionColorGramClassifier
 from data.wiki import WikiArt
 
+
+model_level={"resnet34_orig":{"last":{"out":(1,1,512), "drop":1, "freeze_level":7}},
+             "resnet34_gram":{"conv4":{"out":(14, 14, 256), "drop":3, "freeze_level":7}, "conv3": {"out":(28,28,128),"drop":4, "freeze_level":4}}}
+
 model_config={"resnet34_orig":
-                     {"classifier":EmotionClassifier, "name":"resnet34","drop":1, "freeze_level":7, "mlp":[[512,100],[100,9]], "dropout":[0.3,0.3], "activation":['relu','relu']},
+                     {"classifier":EmotionClassifier,"name":"resnet34", "drop":None, "freeze_level":None, "mlp":[[512,100],[100,9]], "dropout":[0.3,0.3], "activation":['relu','relu']},
               "resnet34_gram":
-                     {"classifier":EmotionGramClassifier, "name":"resnet34","drop":3, "freeze_level":7, "mlp":[[256+14*14,100],[100,9]], "dropout":[0.3,0.3], "activation":['relu','relu']},
-"resnet34_color_gram":{"classifier":EmotionColorGramClassifier, "name":"resnet34","drop":3, "freeze_level":7, "mlp":[[256+14*14+3,100],[100,9]], "dropout":[0.3,0.3], "activation":['relu','relu']},"vgg16":
-                     {"name":"vgg16","drop":2, "freeze_level":7,"mlp":[[25088,2048],[2048,1024],[1024,512],[512,9]],"dropout":[0.5,0.5,0.5,0.5],"activation":['relu','relu','relu','relu']}}
+                     {"classifier":EmotionColorGramClassifier,"name":"resnet34", "drop":None, "freeze_level":None, "mlp":None, "dropout":[0.3,0.3], "activation":['relu','relu']}}
+
+#fillup the model config by feature_set#
+def update_model_config():
+    model_config[args.model]["drop"]=model_level[args.model][args.feature_level]["drop"]
+    model_config[args.model]["freeze_level"]=model_level[args.model][args.feature_level]["freeze_level"]
+    if args.model=="resnet34_gram":#mlp, too
+        mlp_dim=0
+        if "texture" in args.feature_set:
+            mlp_dim+=model_level[args.model][args.feature_level]["out"][2]
+        if "composition" in args.feature_set:
+            mlp_dim+=model_level[args.model][args.feature_level]["out"][0]*model_level[args.model][args.feature_level]["out"][1]
+        if "color" in args.feature_set:
+            mlp_dim+=3
+        model_config[args.model]["mlp"]=[[mlp_dim,100],[100,9]]
 
 
+        
 def train_one_epoch(dataloader, model, loss_fn, optimizer, device):
     size = len(dataloader.dataset)
     model.train()
     for batch, (X_color,X_gray,y,_) in enumerate(dataloader):
         
         X_color,X_gray, y = X_color.to(device), X_gray.to(device), y.to(device)
-        print(X_color.size())
-        print(X_gray.size())
+
+        #print(y)
 
         # Compute prediction error
         pred = model(torch.cat((X_color,X_gray),axis=1))
@@ -63,7 +80,10 @@ def evaluate(dataloader, model, loss_fn, device):
             pred = model(torch.cat((X_color,X_gray),axis=1))
             current = (batch + 1) * len(X_color)
             test_loss += loss_fn(pred, y).item()
-            correct += (pred.argmax(1) == y.argmax(1)).type(torch.float).sum().item()
+            if args.data=="hist_emotion": 
+                correct += (pred.argmax(1) == y.argmax(1)).type(torch.float).sum().item()
+            elif args.data=="max_emotion":
+                correct += (pred.argmax(1) == y).type(torch.float).sum().item()
             print(f"{current:>5d}/{size:>5d}")
     test_loss /= num_batches
     correct /= size
@@ -108,9 +128,10 @@ def main(args):
     val_dataloader = DataLoader(wikiart_val, batch_size=args.num_batches, shuffle=False)
 
 
+    update_model_config()
+    print(model_config)
     #model
-#    principle_axes=torch.from_numpy(np.load("./emotion_principle_axes/ortho_128.npz")['orthogonal_set_128']).to(device)
-    model=model_config[args.model]["classifier"](name=model_config[args.model]["name"],drop=model_config[args.model]["drop"],freeze=model_config[args.model]["freeze_level"],mlp=model_config[args.model]["mlp"],dropout=model_config[args.model]["dropout"],activations=model_config[args.model]["activation"]).to(device)
+    model=model_config[args.model]["classifier"](name=model_config[args.model]["name"],drop=model_config[args.model]["drop"],freeze=model_config[args.model]["freeze_level"],mlp=model_config[args.model]["mlp"],dropout=model_config[args.model]["dropout"],activations=model_config[args.model]["activation"],factors=args.feature_set, level=args.feature_level).to(device)
     model.net.unfreeze()
 
               
@@ -120,11 +141,11 @@ def main(args):
         criterion = nn.KLDivLoss(reduction='batchmean')
 
         
-    elif args.criterion=="max_emotion":
+    elif args.data=="max_emotion":
         criterion = nn.CrossEntropyLoss(reduction='mean')
 
     optimizer = torch.optim.Adam([{'params': filter(lambda p: p.requires_grad, model.parameters()), 'lr': args.learning_rate}])
-#    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.96)
+    #scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.96)
     
     if args.do_eval:
         checkpoint=torch.load(args.do_eval,map_location=device)
@@ -181,7 +202,7 @@ def get_args_parser():
     parser.add_argument("--crop_size",default=224,type=int)
     
     #train#
-    parser.add_argument("--learning_rate",default=5e-4,type=float)#5
+    parser.add_argument("--learning_rate",default=2.5e-4,type=float)#5
     parser.add_argument("--epochs",default=25,type=int)
     parser.add_argument("--num_batches",default=32,type=int)
     parser.add_argument("--start_epoch",default=0,type=int)
@@ -193,10 +214,12 @@ def get_args_parser():
     parser.add_argument("--resume",default=None,type=str,help="model dir to resume training")#resume-training
     parser.add_argument("--do_eval",default=None,type=str,help="model dir to eval")#just-evaluation
     
+    #feature
+    parser.add_argument("--feature_level",default=None,type=str,help="level to extract gram")
+    parser.add_argument("--feature_set",default=None,nargs="*")#["texture","composition","color"]
 
     #test
     parser.add_argument("--version",default=None,type=str)
-    parser.add_argument("--color",default=None,type=str,help="choose color or gray")
     parser.add_argument("--data",default="hist_emotion",type=str,help="kl_div or softmax cross entropy")
 
     return parser
