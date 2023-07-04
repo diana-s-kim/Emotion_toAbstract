@@ -157,7 +157,28 @@ class MLP(nn.Module):
     def forward(self,x):
         return self.fc(x)
                     
+class TransformerEncoder_tc1c2(nn.Module): #(256,196,3) to find interelationship between texture, composition, color
+    def __init__(self):
+        super().__init__()
+        self.make_emb_texture=nn.Linear(256,64)
+        self.make_emb_composition=nn.Linear(196,64)
+        self.make_emb_color=nn.Linear(3,64)
 
+        encoder_layer = nn.TransformerEncoderLayer(d_model=64, nhead=4, dim_feedforward=128, batch_first=True)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=4)
+
+    def forward(self,x):
+        texture=x[:,:256]
+        composition=x[:,256:256+196]
+        color=x[:,-3:]
+
+        texture_emb=torch.unsqueeze(self.make_emb_texture(texture),dim=1)
+        composition_emb=torch.unsqueeze(self.make_emb_composition(composition),dim=1)
+        color_emb=torch.unsqueeze(self.make_emb_color(color),dim=1)
+        return torch.reshape(self.transformer_encoder(torch.cat((texture_emb,composition_emb,color_emb),dim=1)),(-1,64*3))
+        
+    
+        
 
 
 #BaseNet("resnet34",3)
