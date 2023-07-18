@@ -5,7 +5,6 @@ Originally created in 2023, for Python 3.x
 Copyright (c) 2023 Diana S. Kim (diana.se.kim@gmail.com)
 """
 
-
 import torch
 from torch import nn
 from torch.utils.data import Dataset
@@ -19,45 +18,62 @@ import presets_orig_gray
 from classifier import EmotionClassifier
 from gram_classifier import EmotionGramClassifier
 from color_gram_classifier import EmotionColorGramClassifier
+from color_gram_classifier_with_transformer import EmotionColorGramTransformerClassifier
 from data.wiki import WikiArt
 
 
 model_level={"resnet34_orig":{"last":{"out":(1,1,512), "drop":1, "freeze_level":7}},
-             "resnet34_gram":{"conv4":{"out":(14, 14, 256), "drop":3, "freeze_level":7}, "conv3": {"out":(28,28,128),"drop":4, "freeze_level":4}}}
+             "resnet34_gram":{"conv4":{"out":(14, 14, 256), "drop":3, "freeze_level":7}, "conv3": {"out":(28,28,128),"drop":4, "freeze_level":4}},
+             "resnet34_gram_transformer":{"conv4":{"out":(14, 14, 256), "drop":3, "freeze_level":7}, "conv3": {"out":(28,28,128),"drop":4, "freeze_level":4}},
+}
 
 model_config={"resnet34_orig":
-                     {"classifier":EmotionClassifier,"name":"resnet34", "drop":None, "freeze_level":None, "mlp":[[512,100],[100,9]], "dropout":[0.3,0.3], "activation":['relu','relu']},
-              "resnet34_gram":
-                     {"classifier":EmotionColorGramClassifier,"name":"resnet34", "drop":None, "freeze_level":None, "mlp":None, "dropout":[0.3,0.3], "activation":['relu','relu']}}
+                     {"classifier":EmotionClassifier,"name":"resnet34", "drop":None, "freeze_level":None, "mlp":[[512,100],[100,9]], "dropout":[0.3,0.3], "activation":['relu','relu'],"d_model":None, "nhead":None, "dim_feedforward":None, "num_layers":None},
+              "resnet34_gram": 
+                     {"classifier":EmotionColorGramClassifier,"name":"resnet34", "drop":None, "freeze_level":None, "mlp":None, "dropout":[0.3,0.3], "activation":['relu','relu'], "d_model":None, "nhead":None, "dim_feedforward":None, "num_layers":None},
+              "resnet34_gram_transformer": 
+                     {"classifier":EmotionColorGramTransformerClassifier,"name":"resnet34", "drop":None, "freeze_level":None, "mlp":None, "dropout":[0.3,0.3], "activation":['relu','relu'], "d_model":64, "nhead":4, "dim_feedforward":128, "num_layers":4}}
+
 
 #fillup the model config by feature_set#
 def update_model_config():
     model_config[args.model]["drop"]=model_level[args.model][args.feature_level]["drop"]
     model_config[args.model]["freeze_level"]=model_level[args.model][args.feature_level]["freeze_level"]
+    mlp_dim=0
     if args.model=="resnet34_gram":#mlp, too
-        mlp_dim=0
         if "texture" in args.feature_set:
             mlp_dim+=model_level[args.model][args.feature_level]["out"][2]
         if "composition" in args.feature_set:
             mlp_dim+=model_level[args.model][args.feature_level]["out"][0]*model_level[args.model][args.feature_level]["out"][1]
         if "color" in args.feature_set:
             mlp_dim+=3
-        model_config[args.model]["mlp"]=[[mlp_dim,100],[100,9]]
-
+    elif args.model=="resnet34_gram_transformer":
+        if "texture" in args.feature_set:
+            mlp_dim+=model_config[args.model]["d_model"]
+        if "composition" in args.feature_set:
+            mlp_dim+=model_config[args.model]["d_model"]
+        if "color" in args.feature_set:
+            mlp_dim+=model_config[args.model]["d_model"]
+    else:
+        mlp_dim=512
+    model_config[args.model]["mlp"]=[[mlp_dim,100],[100,9]]
 
         
 def train_one_epoch(dataloader, model, loss_fn, optimizer, device):
     size = len(dataloader.dataset)
     model.train()
-    for batch, (X_color,X_gray,y,_) in enumerate(dataloader):
-        
-        X_color,X_gray, y = X_color.to(device), X_gray.to(device), y.to(device)
+    for batch, (X_color,X_gray,y_hist,y,_) in enumerate(dataloader):
+
+        X_color, X_gray, y_hist, y = X_color.to(device), X_gray.to(device), y_hist.to(device), y.to(device)
 
         #print(y)
 
         # Compute prediction error
         pred = model(torch.cat((X_color,X_gray),axis=1))
-        loss = loss_fn(pred, y)
+        if args.data=="hist_emotion":
+            loss = loss_fn(pred, y_hist)
+        elif args.data=="max_emotion":
+            loss = loss_fn(pred, y)
 
         # Backpropagation
         optimizer.zero_grad()
@@ -70,6 +86,7 @@ def train_one_epoch(dataloader, model, loss_fn, optimizer, device):
 
 
 def evaluate(dataloader, model, loss_fn, device):
+    '''
     size = len(dataloader.dataset)
     num_batches = len(dataloader)
     model.eval()
@@ -88,7 +105,31 @@ def evaluate(dataloader, model, loss_fn, device):
     test_loss /= num_batches
     correct /= size
     print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
-    
+
+'''
+    num_batches = len(dataloader)
+    model.eval() 
+    test_loss, correct = 0, 0
+    with torch.no_grad():
+        size=0
+        for batch, (X_color,X_gray,y_hist,y,_) in enumerate(dataloader):
+            X_color, X_gray, y_hist, y = X_color.to(device), X_gray.to(device), y_hist.to(device), y.to(device)
+            pred = model(torch.cat((X_color,X_gray),axis=1))
+            current = (batch + 1) * len(X_color)
+            if args.data=="hist_emotion":
+                test_loss += loss_fn(pred, y_hist).item()
+                dominant_max=(y_hist.max(1).values>0.5)                   
+                size+=len(dominant_max.nonzero())
+                correct += (pred[dominant_max].argmax(1) == y_hist[dominant_max].argmax(1)).type(torch.float).sum().item()
+            elif args.data=="max_emotion":
+                test_loss += loss_fn(pred, y).item()
+                dominant_max=(y_hist.max(1).values>0.5)
+                size+=len(dominant_max.nonzero())
+                correct += (pred[dominant_max].argmax(1) == y[dominant_max]).type(torch.float).sum().item()
+            print(f"{current:>5d}/{size:>5d}")
+    test_loss /= num_batches
+    correct /= size
+    print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
 
 def collect(dataloader, args, model_to_collect,  device):
     try:
@@ -99,7 +140,7 @@ def collect(dataloader, args, model_to_collect,  device):
     backbone=np.empty((0,model_config[args.model]["mlp"][0][0]))#512
     hidden_embedding=np.empty((0,model_config[args.model]["mlp"][-1][0]))#100
 
-    for batch, (X_color,X_gray,_,_) in enumerate(dataloader):
+    for batch, (X_color,X_gray,_,_,_) in enumerate(dataloader):
         X_color, X_gray = X_color.to(device),X_gray.to(device)
         temp_backbone = model_to_collect.collect_feat(torch.cat((X_color,X_gray),axis=1)).detach().cpu().numpy()
         backbone=np.append(backbone,temp_backbone,axis=0)
@@ -131,22 +172,23 @@ def main(args):
     update_model_config()
     print(model_config)
     #model
-    model=model_config[args.model]["classifier"](name=model_config[args.model]["name"],drop=model_config[args.model]["drop"],freeze=model_config[args.model]["freeze_level"],mlp=model_config[args.model]["mlp"],dropout=model_config[args.model]["dropout"],activations=model_config[args.model]["activation"],factors=args.feature_set, level=args.feature_level).to(device)
+    model=model_config[args.model]["classifier"](name=model_config[args.model]["name"],drop=model_config[args.model]["drop"],freeze=model_config[args.model]["freeze_level"],mlp=model_config[args.model]["mlp"],dropout=model_config[args.model]["dropout"],activations=model_config[args.model]["activation"], d_model=model_config[args.model]["d_model"], nhead=model_config[args.model]["nhead"], dim_feedforward=model_config[args.model][ "dim_feedforward"], num_layers=model_config[args.model]["num_layers"], factors=args.feature_set, level=args.feature_level).to(device)
     model.net.unfreeze()
 
+    if args.model=="resnet34_gram_transformer":
+        optimizer = torch.optim.Adam([{'params': model.net.parameters()},{'params': model.fc_layers.parameters()}, {'params': model.transformer.parameters(), 'lr': 7.5e-4}],lr=args.learning_rate)
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.96)
+    else:
+        optimizer = torch.optim.Adam([{'params': filter(lambda p: p.requires_grad, model.parameters()), 'lr': args.learning_rate}])
               
     #optimization
     if args.data=="hist_emotion":
         model=nn.Sequential(model,nn.LogSoftmax(dim=-1))
         criterion = nn.KLDivLoss(reduction='batchmean')
 
-        
     elif args.data=="max_emotion":
         criterion = nn.CrossEntropyLoss(reduction='mean')
 
-    optimizer = torch.optim.Adam([{'params': filter(lambda p: p.requires_grad, model.parameters()), 'lr': args.learning_rate}])
-    #scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.96)
-    
     if args.do_eval:
         checkpoint=torch.load(args.do_eval,map_location=device)
         model.load_state_dict(checkpoint["model_state_dict"],strict=True)
@@ -202,7 +244,7 @@ def get_args_parser():
     parser.add_argument("--crop_size",default=224,type=int)
     
     #train#
-    parser.add_argument("--learning_rate",default=2.5e-4,type=float)#5
+    parser.add_argument("--learning_rate",default=5.0e-4,type=float)#5
     parser.add_argument("--epochs",default=25,type=int)
     parser.add_argument("--num_batches",default=32,type=int)
     parser.add_argument("--start_epoch",default=0,type=int)

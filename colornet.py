@@ -158,14 +158,15 @@ class MLP(nn.Module):
         return self.fc(x)
                     
 class TransformerEncoder_tc1c2(nn.Module): #(256,196,3) to find interelationship between texture, composition, color
-    def __init__(self):
+    def __init__(self,d_model=None,nhead=None,dim_feedforward=None,num_layers=None):
         super().__init__()
-        self.make_emb_texture=nn.Linear(256,64)
-        self.make_emb_composition=nn.Linear(196,64)
-        self.make_emb_color=nn.Linear(3,64)
+        self.d_model=d_model
+        self.make_emb_texture=nn.Linear(256,d_model)
+        self.make_emb_composition=nn.Linear(196,d_model)
+        self.make_emb_color=nn.Linear(3,d_model)
 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=64, nhead=4, dim_feedforward=128, batch_first=True)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=4)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, batch_first=True)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
     def forward(self,x):
         texture=x[:,:256]
@@ -175,7 +176,7 @@ class TransformerEncoder_tc1c2(nn.Module): #(256,196,3) to find interelationship
         texture_emb=torch.unsqueeze(self.make_emb_texture(texture),dim=1)
         composition_emb=torch.unsqueeze(self.make_emb_composition(composition),dim=1)
         color_emb=torch.unsqueeze(self.make_emb_color(color),dim=1)
-        return torch.reshape(self.transformer_encoder(torch.cat((texture_emb,composition_emb,color_emb),dim=1)),(-1,64*3))
+        return torch.reshape(self.transformer_encoder(torch.cat((texture_emb,composition_emb,color_emb),dim=1)),(-1,self.d_model*3))
         
     
         

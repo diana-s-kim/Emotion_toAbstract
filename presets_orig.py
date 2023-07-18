@@ -88,7 +88,7 @@ class ClassificationPresetTrain:
                 transforms.CenterCrop(crop_size),
                 transforms.PILToTensor(),
                 transforms.ConvertImageDtype(torch.float),
-                #transforms.Normalize(mean=mean, std=std), #this makes color meanig (only 0 to 1)
+#                transforms.Normalize(mean=mean, std=std), #this makes color meanig (only 0 to 1) #for base line
             ]
         )
 

@@ -5,7 +5,7 @@ from torch import nn
 import colornet
 
 class EmotionColorGramClassifier(nn.Module):
-    def __init__(self,name=None,drop=None,freeze=None,mlp=None,dropout=None,activations=None,factors=None,level=None):
+    def __init__(self,name=None,drop=None,freeze=None,mlp=None,dropout=None,activations=None,factors=None,level=None,d_model=None,nhead=None,dim_feedforward=None,num_layers=None):
         super().__init__()
         self.net=colornet.BaseNet(name=name,drop=drop,freeze_level=freeze,level=level)
         self.pca=colornet.PCA()
