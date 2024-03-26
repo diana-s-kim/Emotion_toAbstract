@@ -1,0 +1,26 @@
+#mode accuracy#
+def evaluate(dataloader, model, loss_fn, device):
+    num_batches = len(dataloader)
+    model.eval()
+    test_loss, correct = 0, 0
+    with torch.no_grad():
+        size=0
+        for batch, (X_color,X_gray,y_hist,y,_) in enumerate(dataloader):
+            X_color, X_gray, y_hist, y = X_color.to(device), X_gray.to(device), y_hist.to(device), y.to(device)
+            pred = model(torch.cat((X_color,X_gray),axis=1))
+            current = (batch + 1) * len(X_color)
+            if args.data=="hist_emotion":
+                test_loss += loss_fn(pred, y_hist).item()
+                dominant_max=(y_hist.max(1).values>0.5)
+                size+=len(dominant_max.nonzero())
+                correct += (pred[dominant_max].argmax(1) == y_hist[dominant_max].argmax(1)).type(torch.float).sum().item()
+            elif args.data=="max_emotion":
+                test_loss += loss_fn(pred, y).item()
+                dominant_max=(y_hist.max(1).values>0.5)
+                size+=len(dominant_max.nonzero())
+                correct += (pred[dominant_max].argmax(1) == y[dominant_max]).type(torch.float).sum().item()
+            print(f"{current:>5d}/{size:>5d}")
+    test_loss /= num_batches
+    correct /= size
+    print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
+
